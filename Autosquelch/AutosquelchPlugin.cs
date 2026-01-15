@@ -60,7 +60,7 @@ To temporarily turn off the autosquelch, press Ctrl+Alt+D";
         {
             get
             {
-                return new Version(0, 2);
+                return new Version(0, 2, 1);
             }
         }
 
@@ -73,6 +73,8 @@ To temporarily turn off the autosquelch, press Ctrl+Alt+D";
         private bool PluginRunning { get; set; }
 
         private bool AutosquelchDisabled { get; set; }
+
+        private string OpponentName { get; set; }
 
         private bool ShouldTrySquelch => PluginRunning && GameInProgress && !AutosquelchDisabled;
 
@@ -93,16 +95,37 @@ To temporarily turn off the autosquelch, press Ctrl+Alt+D";
             }
         }
 
+        /// <summary>
+        /// Rewinding (keyword) seems to re-start the game and replay all game events. This causes autosquelch to reset and lose its Squelched state
+        /// To combat this, we store the opponent's name as soon as we can and only squelch once for that opponent
+        /// The opponent data seems to be updated between GameStart and ModeChanged events, so we store the name after ModeChanged and then re-evaluate each GameStart
+        /// </summary>
         public void OnLoad()
         {
             Squelched = false;
             PluginRunning = true;
+            OpponentName = null;
 
             HotKeyManager.RegisterHotkey(DefaultHotKey, ToggleAutosquelch, "Toggle Autosquelch");
 
             GameEvents.OnGameStart.Add(() =>
             {
-                Squelched = false;
+                string NewOpponentName = Hearthstone_Deck_Tracker.API.Core.Game.Opponent.Name;
+                Log.Info($"Game started against opponent with name: {NewOpponentName}");
+                if (!string.Equals(this.OpponentName, NewOpponentName))
+                {
+                    Log.Info("Previous opponent name does not match current opponent name. Setting Squelched to false");
+                    Squelched = false;
+                    this.OpponentName = NewOpponentName;
+                }
+            });
+            GameEvents.OnModeChanged.Add(mode =>
+            {
+                if (mode == Hearthstone_Deck_Tracker.Enums.Hearthstone.Mode.GAMEPLAY)
+                {
+                    OpponentName = Hearthstone_Deck_Tracker.API.Core.Game.Opponent.Name;
+                    Log.Info($"Gameplay started against opponent {OpponentName}");
+                }
             });
             GameEvents.OnTurnStart.Add(activePlayer =>
             {
